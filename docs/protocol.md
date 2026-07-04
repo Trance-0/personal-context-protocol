@@ -283,8 +283,24 @@ routes return a structured envelope:
 
 ### GET `/r/:sessionId` (public)
 
-Recording URL entry point. Returns the protocol descriptor so an agent can
-discover where to upload. No token required.
+Recording URL entry point. By default it returns a **self-contained markdown
+instruction document** (`text/markdown`): consent framing, the upload and
+read-back routes with exact `curl` examples, the canonical transcript format,
+limits, and mode guidance. This is why the human prompt can be just "URL +
+token" — the agent fetches the URL and reads everything else there.
+
+Content negotiation: `?format=json` (or `Accept: application/json`) returns the
+structured protocol descriptor instead; `?format=md` forces markdown. No token
+required for either form (only non-secret session information is exposed).
+
+### GET `/r/:sessionId/transcript` (access token)
+
+Session read-back as a raw markdown transcript (`### @role` sections),
+authenticated with `Authorization: Bearer <access-token>`. This is the
+cross-device sync pull: an agent on a new device fetches this single URL and
+receives the recorded conversation in the same human-readable format it records
+in. The document is itself re-importable (paste or POST it to `ingest`). Also
+advertised as `read_transcript` in the protocol descriptor.
 
 ### GET `/api/v1/agent/resolve?url=<recording-url>` (public)
 
@@ -293,7 +309,9 @@ Resolves a recording URL to its protocol descriptor.
 ### GET `/api/v1/agent/sessions/:sessionId/protocol` (public)
 
 Returns the protocol descriptor: `auth`, `routes` (`read_messages`,
-`record_messages`, `record_compact`, `ingest_any`), `allowed_actions` (note
+`read_transcript`, `record_messages`, `record_compact`, `ingest_any`),
+`instructions_url` + `transcript_url` + `preferred_upload_format`,
+`allowed_actions` (note
 `manage_topics: false`), `limits` (`max_messages_per_request: 50`,
 `max_content_chars: 100000`), `existing_message_count`, a `hint`, and
 `recording_mode` + `recording_guidance`. The mode is `wild` (the agent may
@@ -319,19 +337,27 @@ Body (`summary` required):
 
 ### POST `/api/v1/agent/sessions/:sessionId/ingest`
 
-Forgiving ingestion. Accepts raw JSON with top-level `messages` or `summary`,
-`{ messages, compaction }` (mixed), `<PCP_INGEST>...</PCP_INGEST>`,
+Forgiving ingestion; the **primary upload route**. The preferred body is a raw
+markdown transcript — `### @user` / `### @assistant` section headings with the
+message text below each, optionally wrapped in
+`<PCP_TRANSCRIPT>...</PCP_TRANSCRIPT>` — sent as `text/markdown` or
+`text/plain`. No JSON escaping is required and the payload stays human-readable
+end to end. A content line that itself starts with `### @` is escaped as
+`\### @`.
+
+Also accepted (backward compatible): raw JSON with top-level `messages` or
+`summary`, `{ messages, compaction }` (mixed), `<PCP_INGEST>...</PCP_INGEST>`,
 `<PCP_APPEND>...</PCP_APPEND>`, `<PCP_COMPACT>...</PCP_COMPACT>`, ChatML-like
-arrays, or raw transcript text. Messages already present are skipped. On failure
-it returns structured retry guidance (`code: "UNPARSEABLE_PAYLOAD"`), not a vague
-error. Response:
+arrays, or loose `User:` / `Assistant:` transcript lines. Messages already
+present are skipped. On failure it returns structured retry guidance
+(`code: "UNPARSEABLE_PAYLOAD"`), not a vague error. Response:
 
 ```json
 {
   "ok": true,
   "session_id": "ses_...",
   "imported": { "messages": 12, "compactions": 0, "events": 1, "duplicates_skipped": 0 },
-  "notice": "Imported message-level fallback JSON."
+  "notice": "Imported message-level content."
 }
 ```
 
@@ -415,7 +441,8 @@ Returns the JSON schema for the `POST record_compact` payload.
 ### GET `/agent/schema/ingest`
 
 The canonical fallback schema (public, no token). Returns `{ ok, schema_version,
-schema_name, accepted_content_types, accepted_wrappers, limits, modes, ingest_example,
+schema_name, accepted_content_types, accepted_wrappers, preferred_format,
+transcript_example, limits, modes, ingest_example,
 compact_example }`. `modes` defines `wild` (redaction allowed) and `strict`
 (exact preservation requested). This is the single source of truth shared with
 the generated copy-paste fallback prompts — agents should use ONLY these

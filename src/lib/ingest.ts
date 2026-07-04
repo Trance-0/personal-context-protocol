@@ -4,11 +4,13 @@
  * Accepts whatever an AI agent can most easily produce and normalizes it into
  * either append-able messages or a compaction record:
  *
+ *   - raw markdown transcript with `### @role` section headings (canonical)
+ *   - <PCP_TRANSCRIPT> ... </PCP_TRANSCRIPT>  (markdown transcript block)
  *   - { "messages": [ ... ] }
  *   - <PCP_APPEND> ... </PCP_APPEND>     (JSON: array or { messages })
  *   - <PCP_COMPACT> ... </PCP_COMPACT>   (JSON object, or plain summary text)
  *   - simple ChatML-like arrays:  [ { role, content }, ... ]
- *   - raw markdown / text transcript ("User: ...\nAssistant: ...")
+ *   - loose "User: ...\nAssistant: ..." transcript lines
  *
  * Pure and self-contained so it can be unit-tested. Returns a discriminated
  * result; the route turns `{ kind: 'error' }` into structured retry guidance.
@@ -169,8 +171,52 @@ function coerceCombined(value: unknown, limit: number): IngestResult | null {
   return null;
 }
 
-/** Best-effort transcript parse: split on `Role:` line markers. */
+/** Canonical transcript heading: `### @role` alone on its line. */
+const TRANSCRIPT_HEADING = /^###\s*@([A-Za-z_]+)\s*$/;
+
+/** Strip the heading escape produced by the transcript renderer (`\### @` -> `### @`). */
+function unescapeTranscriptLine(line: string): string {
+  return /^\\+###\s*@/.test(line) ? line.slice(1) : line;
+}
+
+/**
+ * Parse the canonical markdown transcript: `### @role` section headings with
+ * the message text below each. Prose before the first heading (e.g. "Here is
+ * the transcript:") is ignored. Returns null when no heading is present.
+ */
+function parseHeadingTranscript(text: string): NormalizedMessage[] | null {
+  const lines = text.split(/\r?\n/);
+  if (!lines.some((line) => TRANSCRIPT_HEADING.test(line))) return null;
+
+  const messages: NormalizedMessage[] = [];
+  let current: { role: MessageRole; lines: string[] } | null = null;
+  for (const line of lines) {
+    const match = line.match(TRANSCRIPT_HEADING);
+    if (match) {
+      if (current) {
+        const content = current.lines.join('\n').trim();
+        if (content) messages.push({ role: current.role, content });
+      }
+      current = { role: normalizeRole(match[1]), lines: [] };
+    } else if (current) {
+      current.lines.push(unescapeTranscriptLine(line));
+    }
+  }
+  if (current) {
+    const content = current.lines.join('\n').trim();
+    if (content) messages.push({ role: current.role, content });
+  }
+  return messages.length ? messages : null;
+}
+
+/**
+ * Best-effort transcript parse. Canonical `### @role` headings win when
+ * present; otherwise split on loose `Role:` line markers.
+ */
 export function parseTranscript(text: string): NormalizedMessage[] {
+  const headingMessages = parseHeadingTranscript(text);
+  if (headingMessages) return headingMessages;
+
   const lines = text.split(/\r?\n/);
   const messages: NormalizedMessage[] = [];
   let current: NormalizedMessage | null = null;
@@ -191,13 +237,15 @@ export function parseTranscript(text: string): NormalizedMessage[] {
   return messages.map((message) => ({ ...message, content: message.content.trim() }));
 }
 
+/** Extract a `<TAG>`/`<TAG attr…>` block body; tolerates attributes in the open tag. */
 function extractTag(text: string, tag: string): string | null {
-  const open = `<${tag}>`;
+  const open = text.match(new RegExp(`<${tag}(?:\\s[^>]*)?>`));
+  if (!open || open.index === undefined) return null;
   const close = `</${tag}>`;
-  const start = text.indexOf(open);
-  const end = text.indexOf(close);
-  if (start === -1 || end === -1 || end < start) return null;
-  return text.slice(start + open.length, end).trim();
+  const start = open.index + open[0].length;
+  const end = text.indexOf(close, start);
+  if (end === -1) return null;
+  return text.slice(start, end).trim();
 }
 
 function tryJson(text: string): unknown | undefined {
@@ -272,6 +320,26 @@ export function parseIngestPayload(
   const text = (rawBody || '').trim();
   if (!text) {
     return { kind: 'error', reason: 'empty request body' };
+  }
+
+  // 0. Canonical markdown transcript block (raw, human-readable format).
+  const transcriptTag = extractTag(text, 'PCP_TRANSCRIPT');
+  if (transcriptTag !== null) {
+    const transcriptMessages = parseTranscript(transcriptTag);
+    if (transcriptMessages.length) {
+      return { kind: 'messages', messages: transcriptMessages.slice(0, limit) };
+    }
+    return { kind: 'error', reason: 'PCP_TRANSCRIPT block contained no messages' };
+  }
+
+  // 0b. Unclosed PCP_TRANSCRIPT tag (agent forgot </PCP_TRANSCRIPT>).
+  const partialTranscript = text.match(/<PCP_TRANSCRIPT(?:\s[^>]*)?>/);
+  if (partialTranscript && partialTranscript.index !== undefined) {
+    const rest = text.slice(partialTranscript.index + partialTranscript[0].length).trim();
+    const transcriptMessages = parseTranscript(rest);
+    if (transcriptMessages.length) {
+      return { kind: 'messages', messages: transcriptMessages.slice(0, limit) };
+    }
   }
 
   // 1. Canonical combined block: messages and/or a nested compaction.

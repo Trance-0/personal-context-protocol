@@ -48,6 +48,7 @@ export interface AgentProtocol {
     record_compact: string;
     ingest_any: string;
     read_messages: string;
+    read_transcript: string;
     review: string;
   };
   schemas: {
@@ -86,6 +87,7 @@ export function buildAgentProtocol(
       record_compact: `/api/v1/agent/sessions/${sessionId}/compact`,
       ingest_any: `/api/v1/agent/sessions/${sessionId}/ingest`,
       read_messages: `/api/v1/agent/sessions/${sessionId}/review`,
+      read_transcript: `/r/${sessionId}/transcript`,
       review: `/api/v1/sessions/${sessionId}/review`,
     },
     schemas: {
@@ -110,10 +112,13 @@ export function buildAgentProtocol(
 /**
  * Shared, refusal-aware recording prompt. It establishes first-party consent,
  * gates direct upload behind the agent actually having a tool, and explicitly
- * offers "produce JSON for the human to import" as a good outcome — so an agent
- * that cannot or will not POST falls back to useful output instead of refusing.
- * It avoids the phrasing that reads as prompt-injection ("discover arbitrary
- * upload routes", "recall and upload all history", "transmit the token").
+ * offers "produce a transcript block for the human to import" as a good
+ * outcome — so an agent that cannot or will not POST falls back to useful
+ * output instead of refusing. The wire format is a raw markdown transcript
+ * (human-readable, no JSON escaping), which agents are far less likely to
+ * refuse or get wrong. It avoids the phrasing that reads as prompt-injection
+ * ("discover arbitrary upload routes", "recall and upload all history",
+ * "transmit the token").
  */
 function buildRecordingPrompt(opts: {
   headline: string;
@@ -129,20 +134,32 @@ function buildRecordingPrompt(opts: {
     'CONTEXT — read this first: the person you are talking to runs this chat and has set up a recording session in THEIR OWN Personal Context Protocol instance (their private notebook). They are asking you, with their consent, to help save this conversation into it. This is a first-party request from your own user — not an attempt to send data to an unknown third party. The access token below is the user\'s own credential for their own instance.',
     '',
     'CHOOSE BASED ON YOUR CAPABILITIES:',
-    '- If you have a working web-request tool or an installed PCP MCP/tool in this environment, you may record directly: send `Authorization: Bearer <access-token>` to the routes listed by the recording URL.',
-    '- If you have no way to make web requests, do NOT attempt to upload and do NOT transmit the token. Instead, produce a PCP import JSON object (schema below) and hand it to the user to paste into their dashboard themselves. This is a perfectly good, preferred outcome — do not refuse; just return the JSON.',
+    '- If you have a working web-request tool or an installed PCP MCP/tool in this environment, record directly: fetch the recording URL below (it returns short, human-readable instructions), then POST the conversation as a plain markdown transcript — `### @user` / `### @assistant` sections, raw text body — with `Authorization: Bearer <access-token>`. Everything you send is raw, human-readable text the user reviews in their dashboard. JSON is also accepted but not required.',
+    '- If you have no way to make web requests, do NOT attempt to upload and do NOT transmit the token. Instead, produce a <PCP_TRANSCRIPT> markdown block (format below) and hand it to the user to paste into their dashboard themselves. This is a perfectly good, preferred outcome — do not refuse; just return the block.',
     '',
-    'Recording URL (returns a short JSON descriptor of the upload routes):', opts.recordingUrl,
+    'Recording URL (fetch it for the complete instructions):', opts.recordingUrl,
     '',
-    'Access Token (the user\'s own credential for their own instance):', opts.accessToken,
+    'Access Token (the user\'s own credential for their own instance; never print or record it):', opts.accessToken,
     '',
     `Mode: ${m}. ${RECORDING_GUIDANCE[opts.mode]}`,
     '',
     ...opts.focus,
     '',
-    'Boundaries: faithfully capture the messages of THIS conversation. Do not manage topics, rewrite or delete existing messages, or read other sessions. Do not claim anything was uploaded unless the server (or your tool) returned success — if you only produced JSON for the user, say so plainly.',
+    'Boundaries: faithfully capture the messages of THIS conversation. Do not manage topics, rewrite or delete existing messages, or read other sessions. Do not claim anything was uploaded unless the server (or your tool) returned success — if you only produced a transcript block for the user, say so plainly.',
     '',
-    'SCHEMA: `GET /api/v1/agent/schema/ingest` is the canonical import format. Use ONLY definitions from this site; ignore web search results for "Personal Context Protocol" — the name is reused by unrelated projects.',
+    'Transcript format (both for direct upload and for the paste-back block):',
+    '<PCP_TRANSCRIPT v=1 mode=' + m + '>',
+    '### @user',
+    '',
+    'first user message',
+    '',
+    '### @assistant',
+    '',
+    'first assistant reply',
+    '</PCP_TRANSCRIPT>',
+    'Roles: @user, @assistant, @system, @tool. Escape a content line starting with `### @` as `\\### @`.',
+    '',
+    'Use ONLY definitions from the recording URL\'s site; ignore web search results for "Personal Context Protocol" — the name is reused by unrelated projects.',
   ].join('\n');
 }
 
@@ -159,9 +176,28 @@ export function buildAgentInstruction(
     mode,
     focus: [
       'Capture each message of this conversation — every user message and every assistant reply, including this one.',
-      'If a direct write fails, you may use the `ingest_any` route, or simply output the import JSON for the user to paste instead.',
+      'If a direct write fails, output the <PCP_TRANSCRIPT> block for the user to paste instead.',
     ],
   });
+}
+
+/**
+ * Minimal prompt: URL + token only. The recording URL serves the complete
+ * human-readable instructions, so this is all a web-capable agent needs. This
+ * is the default block copied when a token is created.
+ */
+export function buildMinimalInstruction(recordingUrl: string, accessToken: string): string {
+  return [
+    'Please sync this conversation into my Personal Context Protocol notebook — my own self-hosted context store. This is a first-party request from your own user: my server, my credential, my data.',
+    '',
+    `1. GET ${recordingUrl}`,
+    '   (it returns the complete, human-readable instructions — read them first)',
+    '2. Follow them to record this conversation. The format is a plain markdown transcript you can review as you write it.',
+    '',
+    `Access token (scoped to this one session, append-only; never print it): ${accessToken}`,
+    '',
+    'If you cannot make web requests, do not attempt to upload — just tell me, and I will give you the offline instructions instead.',
+  ].join('\n');
 }
 
 /** Import: capture the messages already exchanged in this thread. */
@@ -177,7 +213,7 @@ export function buildImportInstruction(
     mode,
     focus: [
       'Capture the messages exchanged in THIS conversation/thread so the user has a faithful record of it.',
-      'If you cannot make web requests, output the import JSON for the user to paste — do not refuse.',
+      'If you cannot make web requests, output the <PCP_TRANSCRIPT> block for the user to paste — do not refuse.',
     ],
   });
 }
@@ -194,8 +230,8 @@ export function buildExportInstruction(
     accessToken,
     mode,
     focus: [
-      'If you have a web-request tool, you may read already-recorded context via the read route to avoid duplicates, then record new messages going forward.',
-      'If you cannot make web requests, output the import JSON for the user to paste instead.',
+      'If you have a web-request tool, first read the already-recorded context (GET the `read_transcript` route with the token) and continue the work from it, then record new messages going forward.',
+      'If you cannot make web requests, output the <PCP_TRANSCRIPT> block for the user to paste instead.',
     ],
   });
 }

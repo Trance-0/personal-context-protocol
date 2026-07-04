@@ -7,7 +7,7 @@ import { logError } from '@/lib/logging';
 import { createTokenSchema, manageTokenSchema } from '@/lib/validations';
 import { DEFAULT_EXPIRATION, resolveExpiresAt, tokenStatus } from '@/lib/token-expiration';
 import { buildRecordingUrl, resolveAppBaseUrl } from '@/lib/recording-url';
-import { buildAgentInstruction, buildExportInstruction, buildImportInstruction, normalizeRecordingMode } from '@/lib/agent-protocol';
+import { buildAgentInstruction, buildExportInstruction, buildImportInstruction, buildMinimalInstruction, normalizeRecordingMode } from '@/lib/agent-protocol';
 import { uniqueTokenName } from '@/lib/session-store';
 import { and, desc, eq } from 'drizzle-orm';
 
@@ -225,6 +225,7 @@ export async function POST(
       token,
       access_token: token,
       recording_url: recordingUrl,
+      minimal_instruction: buildMinimalInstruction(recordingUrl, token),
       instruction: buildAgentInstruction(recordingUrl, token, mode),
       import_instruction: buildImportInstruction(recordingUrl, token, mode),
       export_instruction: buildExportInstruction(recordingUrl, token, mode),

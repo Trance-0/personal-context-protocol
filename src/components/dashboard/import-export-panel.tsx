@@ -3,8 +3,9 @@
 import { useEffect, useState } from 'react';
 import { ChevronRight, Download, FileJson, Clipboard, ShieldAlert, Shield } from 'lucide-react';
 import { Message } from './types';
-import { buildIngestExport, buildCompactExport, ExportCompaction } from '@/lib/ingest-export';
+import { buildIngestExport, buildCompactExport, redactSecrets, ExportCompaction } from '@/lib/ingest-export';
 import { buildFallbackInstruction } from '@/lib/agent-schema';
+import { messagesToTranscript, TRANSCRIPT_VERSION } from '@/lib/agent-markdown';
 import { displayMode, RecordingMode } from '@/lib/agent-protocol';
 
 interface ImportExportPanelProps {
@@ -26,12 +27,23 @@ function download(filename: string, content: string, type: string) {
   URL.revokeObjectURL(url);
 }
 
-function toMarkdown(messages: Message[], title: string): string {
-  const lines = [`# ${title}`, ''];
-  for (const m of messages) {
-    lines.push(`## ${m.role} (#${m.ordinal})`, '', m.content, '');
-  }
-  return lines.join('\n');
+/**
+ * Canonical `<PCP_TRANSCRIPT>` markdown export. Round-trippable: pasting this
+ * into another session's Import box (or POSTing it to ingest) reproduces the
+ * messages, so this is the human-readable cross-device sync artifact.
+ */
+function toTranscript(messages: Message[], title: string, mode: 'wild' | 'strict'): string {
+  const exported = mode === 'wild'
+    ? messages.map((m) => ({ ...m, content: redactSecrets(m.content).text }))
+    : messages;
+  return [
+    `# ${title}`,
+    '',
+    `<PCP_TRANSCRIPT v=${TRANSCRIPT_VERSION} mode=${mode}>`,
+    messagesToTranscript(exported),
+    '</PCP_TRANSCRIPT>',
+    '',
+  ].join('\n');
 }
 
 /**
@@ -90,9 +102,10 @@ export function ImportExportPanel({ sessionId, sessionTitle, mode, messages, onC
           <div>
             <p className="mb-1.5 text-xs font-medium uppercase tracking-wide text-slate-500 dark:text-slate-400">Export JSON ({messages.length} messages, {compactions.length} compactions)</p>
             <div className="flex flex-wrap gap-2">
+              <button className={btn} onClick={() => copy(toTranscript(messages, sessionTitle, exportMode), 'transcript')} type="button" title="Human-readable markdown transcript; paste into another session's Import box to sync"><Clipboard size={13} /> {copied === 'transcript' ? 'Copied' : 'Copy transcript (.md)'}</button>
+              <button className={btn} onClick={() => download(`pcp-session-${sessionId}.md`, toTranscript(messages, sessionTitle, exportMode), 'text/markdown')} type="button"><Download size={13} /> Download .md</button>
               <button className={btn} onClick={() => copy(ingestJson(), 'ingest')} type="button"><Clipboard size={13} /> {copied === 'ingest' ? 'Copied' : 'Copy PCP_INGEST'}</button>
               <button className={btn} onClick={() => download(`pcp-ingest-${sessionId}.json`, ingestJson(), 'application/json')} type="button"><Download size={13} /> Download .json</button>
-              <button className={btn} onClick={() => download(`pcp-session-${sessionId}.md`, toMarkdown(messages, sessionTitle), 'text/markdown')} type="button"><Download size={13} /> Download .md</button>
               <button className={btn} onClick={() => copy(compactJson(), 'compact')} type="button"><Clipboard size={13} /> {copied === 'compact' ? 'Copied' : 'Copy PCP_COMPACT'}</button>
               <button className={btn} onClick={() => download(`pcp-compact-${sessionId}.json`, compactJson(), 'application/json')} type="button"><Download size={13} /> Download compact .json</button>
             </div>

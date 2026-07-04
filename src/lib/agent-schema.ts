@@ -9,7 +9,8 @@
  * the database stores `wild` | `exact`; `exact` is surfaced as `strict`.
  */
 
-import { DisplayMode, MAX_CONTENT_CHARS, MAX_MESSAGES_PER_REQUEST, RECORDING_GUIDANCE, RecordingMode, displayMode } from './agent-protocol';
+import { DisplayMode, MAX_CONTENT_CHARS, MAX_MESSAGES_PER_REQUEST, RecordingMode, displayMode } from './agent-protocol';
+import { transcriptExampleText } from './agent-markdown';
 
 export const INGEST_SCHEMA_VERSION = 1;
 export const INGEST_SCHEMA_NAME = 'pcp_ingest';
@@ -70,10 +71,13 @@ export function buildIngestSchemaDescriptor() {
     ok: true,
     schema_version: INGEST_SCHEMA_VERSION,
     schema_name: INGEST_SCHEMA_NAME,
-    accepted_content_types: ['application/json', 'text/plain'],
-    accepted_wrappers: ['none', 'PCP_INGEST', 'PCP_COMPACT', 'PCP_APPEND_LEGACY'],
+    accepted_content_types: ['text/markdown', 'text/plain', 'application/json'],
+    accepted_wrappers: ['none', 'PCP_TRANSCRIPT', 'PCP_INGEST', 'PCP_COMPACT', 'PCP_APPEND_LEGACY'],
+    preferred_format:
+      'A raw markdown transcript: `### @role` section headings (user/assistant/system/tool) with the message text below each, optionally wrapped in <PCP_TRANSCRIPT>. Human-readable; no JSON escaping.',
     limits: { max_messages_per_request: MAX_MESSAGES_PER_REQUEST, max_messages_per_import: 500, max_content_chars: MAX_CONTENT_CHARS },
     modes: INGEST_MODES,
+    transcript_example: transcriptExampleText(),
     ingest_example: INGEST_EXAMPLE,
     compact_example: COMPACT_EXAMPLE,
     // Anti-search guard: the project name has been reused by unrelated projects.
@@ -126,33 +130,38 @@ export function buildMcpInstruction(recordingUrl: string, accessToken: string, m
 /**
  * Safe copy-paste fallback instruction for prompt-only agents. It deliberately
  * omits the recording URL and access token and never asks the agent to upload,
- * discover routes, or keep recording — only to produce reviewable import JSON.
+ * discover routes, or keep recording — only to produce a reviewable, raw
+ * markdown transcript block the human imports themselves. Markdown (not JSON)
+ * is the requested output: it is human-readable for review, has no escaping
+ * pitfalls, and is far less likely to be refused or mangled.
  */
 export function buildFallbackInstruction(mode: DisplayMode, appUrl: string): string {
   const schemaUrl = `${(appUrl || '').replace(/\/+$/, '')}${SCHEMA_PATH}`;
   const common = [
-    'You are helping me export this conversation into Personal Context Protocol.',
+    'You are helping me export this conversation into Personal Context Protocol, my own private context notebook.',
     '',
     'Do not upload anything directly unless you have an explicit PCP tool/MCP capability available in this host environment.',
     '',
-    'Your task is to produce a PCP import JSON object that I can review and import myself.',
+    'Your task is to write this conversation out as a single <PCP_TRANSCRIPT> markdown block that I can review and import myself. Plain text — no JSON, no tools, no credentials needed.',
+    '',
+    'Format:',
+    transcriptExampleText(mode === 'strict' ? 'exact' : 'wild'),
     '',
     `Mode: ${mode}.`,
     '',
     'Rules:',
+    '- Start each message with a `### @role` line (roles: @user, @assistant, @system, @tool); put the message text verbatim below it. Markdown inside messages is fine.',
+    '- Include every visible message of this conversation, in order, including this exchange.',
+    '- If a message line itself starts with `### @`, escape it as `\\### @`.',
   ];
   const tail = [
     '- Do not fetch arbitrary upload routes.',
     '- Do not claim anything was uploaded.',
     '- Do not keep recording future messages.',
-    '- If exact timestamps are unavailable, use `created_at: null`.',
-    '- If observation time is unavailable, use `observed_at: null`.',
     '',
-    'Return only valid JSON matching the current PCP ingest schema.',
-    `First use the schema shown below. If you have web access and are allowed to fetch a public schema, you may fetch: ${schemaUrl}`,
+    'Return only the <PCP_TRANSCRIPT> block.',
+    `(A JSON form is also accepted if your host requires structured output — schema: ${schemaUrl} — but the markdown transcript is preferred.)`,
     'Do not use search results for Personal Context Protocol.',
-    '',
-    ingestExampleText(),
   ];
   const wildRules = [
     '- Do not include passwords, API keys, bearer tokens, database URLs, private keys, or live credentials.',
@@ -165,13 +174,13 @@ export function buildFallbackInstruction(mode: DisplayMode, appUrl: string): str
     '- Preserve every visible message as exactly as possible.',
     '- Include full text of user, assistant, system, tool, and unknown-role messages.',
     '- Preserve credentials/secrets if they are visible and the host policy allows you to repeat them.',
-    '- If host policy prevents repeating a secret, replace only that exact secret value with `<REDACTED>` and add a `sensitive_redactions` entry explaining the type of redaction.',
+    '- If host policy prevents repeating a secret, replace only that exact secret value with `<REDACTED>` and add a `> redacted:` note line directly after that message explaining the type of redaction.',
     '- Do not omit a whole message merely because part of it contains a secret.',
     '- Do not silently summarize when message-level reconstruction is possible.',
   ];
   const strictFooter = [
     '',
-    'If you cannot comply with strict preservation, still return valid PCP JSON with:',
+    'If you cannot comply with strict preservation, still return a valid <PCP_TRANSCRIPT> block with:',
     '- all non-sensitive text preserved',
     '- redacted placeholders only where required',
     '- a warning explaining why exact strict export was not possible',

@@ -15,21 +15,55 @@ Personal Context Protocol stores AI conversation context in user-managed topics 
   ChatGPT-style nav shows topics as collapsible groups with nested sessions, plus
   an Uncategorized group for sessions with no topic. Right-click or long-press an
   item to remove it.
-- Each session produces a **recording URL + access token** pair. An agent fetches
-  the recording URL to discover its upload routes, then records using only
-  `Authorization: Bearer <access-token>`.
+- Each session produces a **recording URL + access token** pair — and that pair
+  is the whole handoff. The recording URL serves a self-contained, human-readable
+  markdown instruction page (JSON descriptor via `?format=json`), so the prompt
+  you give an agent is two lines: the URL and the token.
+- The wire format is a **raw markdown transcript** (`### @user` / `### @assistant`
+  sections) in both directions: agents POST it to record, and pull
+  `/r/<sessionId>/transcript` to load recorded context on another device. No JSON
+  escaping, human-reviewable end to end; JSON remains accepted for structured
+  clients.
 - Agents append messages to their assigned session only, or send a compaction
-  when full upload is impossible. They never manage topics.
+  when full upload is impossible. They never manage topics. Tokens are scoped to
+  one session and append-only, and the instruction page says so — which is what
+  lets cautious agents pass their own safety screening instead of refusing.
 - The admin dashboard previews sessions, events, token status, and exports;
   tokens can be revoked from a modal, and a session can be made public for a
   read-only shared view at `/s/<sessionId>`.
-- For agents that **refuse direct upload**, the session **Import / Export** panel
-  generates copy-paste fallback prompts (Wild = redaction allowed, Strict = exact
-  preservation) that ask the agent only to produce review-able JSON — no token,
-  no upload — which the human pastes back. Agents with a PCP MCP/tool integration
-  get a direct-upload (MCP) prompt instead. Export recorded messages/compactions
-  as PCP JSON (`.json` / `.md`), and validate fallback payloads with the
-  `ingest-dry-run` endpoint.
+- For agents that **cannot or will not upload**, the session **Import / Export**
+  panel generates copy-paste fallback prompts (Wild = redaction allowed, Strict =
+  exact preservation) that ask the agent only to produce a review-able
+  `<PCP_TRANSCRIPT>` markdown block — no token, no upload, no JSON — which the
+  human pastes back into the Import box. Agents with a PCP MCP/tool integration
+  get a direct-upload (MCP) prompt instead. Export recorded sessions as a
+  round-trippable markdown transcript (`.md`) or PCP JSON (`.json`), and validate
+  fallback payloads with the `ingest-dry-run` endpoint.
+
+## Sync your Claude (or any agent) context across devices
+
+The first-class flow this project targets: continue one piece of work across
+devices and assistants with minimal typing.
+
+1. In the dashboard, create a session and click **Generate token**. The copied
+   block is a minimal two-step prompt containing only the recording URL and the
+   token.
+2. **Device A** — paste that block into Claude (Code, chat, or any web-capable
+   agent). It fetches the URL, reads the instructions there, and records the
+   conversation as a plain markdown transcript you can review in the dashboard.
+3. **Device B** — tell the agent to continue:
+
+   ```text
+   Load my prior context from my self-hosted PCP notebook, then continue the work:
+   GET https://<domain>/r/<sessionId>/transcript
+   Authorization: Bearer <access-token>
+   ```
+
+   The transcript it fetches is the context — human-readable, and re-importable
+   anywhere.
+4. **Offline / restricted agents** — use the Import/Export panel's Wild/Strict
+   prompt instead; the agent outputs a `<PCP_TRANSCRIPT>` block you paste into
+   the Import box yourself. Same format, no credentials involved.
 
 ## Deploy
 

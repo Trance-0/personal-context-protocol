@@ -3,4 +3,4 @@
  * `npm_package_version` when scripts run locally. The fallback must match the
  * root VERSION file and is checked by scripts/version-check.js.
  */
-export const APP_VERSION = process.env.PCP_VERSION || process.env.npm_package_version || '0.1.21';
+export const APP_VERSION = process.env.PCP_VERSION || process.env.npm_package_version || '0.1.22';

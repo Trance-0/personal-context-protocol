@@ -96,7 +96,7 @@ export async function POST(
       ? 'Imported a compact summary. No raw messages were included.'
       : messagesImported === 0 && incoming.length > 0
         ? 'Everything in the payload was already recorded.'
-        : 'Imported message-level fallback JSON.';
+        : 'Imported message-level content.';
 
     return NextResponse.json({
       ok: true,

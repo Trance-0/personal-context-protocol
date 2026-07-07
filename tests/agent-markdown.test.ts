@@ -86,6 +86,48 @@ describe('canonical markdown transcript', () => {
   });
 });
 
+describe('suggested session title', () => {
+  it('reads title="..." from the PCP_TRANSCRIPT tag', () => {
+    const result = parseIngestPayload('<PCP_TRANSCRIPT v=1 mode=wild title="Rotating the deploy key">\n### @user\n\nq\n</PCP_TRANSCRIPT>');
+    expect(result.kind).toBe('messages');
+    if (result.kind === 'messages') expect(result.suggestedTitle).toBe('Rotating the deploy key');
+  });
+
+  it("reads title='...' with single quotes", () => {
+    const result = parseIngestPayload("<PCP_TRANSCRIPT title='Fix pool exhaustion'>\n### @user\n\nq\n</PCP_TRANSCRIPT>");
+    if (result.kind === 'messages') expect(result.suggestedTitle).toBe('Fix pool exhaustion');
+  });
+
+  it('carries title through an unclosed transcript tag', () => {
+    const result = parseIngestPayload('<PCP_TRANSCRIPT title="Deploy notes">\n### @user\n\nq');
+    if (result.kind === 'messages') expect(result.suggestedTitle).toBe('Deploy notes');
+  });
+
+  it('has no title when the attribute is absent', () => {
+    const result = parseIngestPayload('### @user\n\nq');
+    if (result.kind === 'messages') expect(result.suggestedTitle).toBeUndefined();
+  });
+
+  it('reads suggested_session_title / session_title from JSON', () => {
+    const a = parseIngestPayload(JSON.stringify({ messages: [{ role: 'user', content: 'q' }], suggested_session_title: 'JSON title' }));
+    if (a.kind === 'messages') expect(a.suggestedTitle).toBe('JSON title');
+    const b = parseIngestPayload(JSON.stringify({ messages: [{ role: 'user', content: 'q' }], session_title: 'Alias title' }));
+    if (b.kind === 'messages') expect(b.suggestedTitle).toBe('Alias title');
+  });
+
+  it('ignores the schema placeholder title', () => {
+    const result = parseIngestPayload(JSON.stringify({ messages: [{ role: 'user', content: 'q' }], suggested_session_title: 'optional title' }));
+    if (result.kind === 'messages') expect(result.suggestedTitle).toBeUndefined();
+  });
+
+  it('the recording-URL instructions require a descriptive title', () => {
+    const doc = buildInstructionMarkdown({ base: 'https://pcp.example.com', sessionId: 'ses_1', mode: 'wild', existingMessageCount: 0 });
+    expect(doc).toMatch(/always set a `title`/i);
+    expect(doc).toContain('title="Short specific title of this conversation"');
+    expect(doc).toMatch(/New Session/);
+  });
+});
+
 describe('transcript read-back document', () => {
   it('wraps messages with a header and machine comment', () => {
     const doc = buildTranscriptDocument({

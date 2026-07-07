@@ -36,10 +36,12 @@ function toTranscript(messages: Message[], title: string, mode: 'wild' | 'strict
   const exported = mode === 'wild'
     ? messages.map((m) => ({ ...m, content: redactSecrets(m.content).text }))
     : messages;
+  // Escape double quotes so the title attribute stays well-formed.
+  const titleAttr = title.replace(/"/g, '&quot;');
   return [
     `# ${title}`,
     '',
-    `<PCP_TRANSCRIPT v=${TRANSCRIPT_VERSION} mode=${mode}>`,
+    `<PCP_TRANSCRIPT v=${TRANSCRIPT_VERSION} mode=${mode} title="${titleAttr}">`,
     messagesToTranscript(exported),
     '</PCP_TRANSCRIPT>',
     '',

@@ -82,6 +82,35 @@ Shipped within the v0.1 line (still gated on v0.1 Remaining Hardening before v0.
 - [x] **Message correction** (v0.1.10): human admin edit/delete (append-only still enforced for AI);
   multi-select with select-all + shift-range; long messages fold to 5 lines in select mode
 
+## v0.1.23 Completed — Copy feedback, drag jitter, agent titling
+
+- [x] **Copy shows "Copied"** — the token-block modal's Copy button now flashes
+  a green "Copied" state (with check icon) on a successful clipboard write and
+  stays unchanged when clipboard access is denied, so the user knows to copy
+  manually
+- [x] **Drag-to-recategorize jitter fixed** — `onDragOver` no longer calls
+  `onToggleExpand` on every event (which thrashed the folder open/closed while
+  hovering). Drop targets now show a steady ring highlight, and a collapsed
+  topic auto-expands once after ~550 ms of hovering; the timer is cancelled on
+  drag leave/drop/end
+- [x] **Agents now title sessions to fit the conversation** — three root causes
+  fixed:
+  - `can_rename_session` defaulted to `false`, so agent title suggestions were
+    rejected with FORBIDDEN; new tokens now default to `true`
+  - the primary markdown transcript path had no title channel; the parser now
+    reads `title="…"` from the `<PCP_TRANSCRIPT>` tag (and
+    `suggested_session_title` / `session_title` from JSON payloads, ignoring
+    the schema placeholder), and the agent ingest route applies it — dropped
+    silently for restricted tokens instead of failing the ingest
+  - instructions barely mentioned titling; the recording-URL document, shared
+    recording prompts, minimal prompt, and Wild/Strict fallback prompts now
+    all require a concise 3–8-word title (not "Chat"/"New Session"), and the
+    transcript examples carry a `title` attribute; the export panel emits
+    `title="…"` (quote-escaped) so exports round-trip the title too
+- [x] Tests: copied-state markup compiles; 7 new title-channel tests (tag
+  attribute single/double quotes, unclosed tag, JSON aliases, placeholder
+  ignored, instruction-doc requirement); 149 tests pass
+
 ## v0.1.22 Completed — Markdown-first protocol (URL + token is the whole prompt)
 
 Goal: no capable agent refuses the sync request, and the human hands over only

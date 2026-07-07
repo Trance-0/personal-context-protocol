@@ -80,6 +80,9 @@ export async function POST(
         const result = await appendMessagesToSession({
           sessionId: params.id,
           messages: validation.data.messages,
+          // A restricted token cannot rename; drop the suggestion rather than
+          // failing the whole ingest.
+          suggestedTitle: authResult.canRenameSession ? parsed.suggestedTitle : undefined,
           canRenameSession: authResult.canRenameSession,
           actor,
         });

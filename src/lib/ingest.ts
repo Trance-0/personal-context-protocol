@@ -41,9 +41,9 @@ export interface NormalizedCompact {
 }
 
 export type IngestResult =
-  | { kind: 'messages'; messages: NormalizedMessage[] }
-  | { kind: 'compact'; compact: NormalizedCompact }
-  | { kind: 'mixed'; messages: NormalizedMessage[]; compact: NormalizedCompact }
+  | { kind: 'messages'; messages: NormalizedMessage[]; suggestedTitle?: string }
+  | { kind: 'compact'; compact: NormalizedCompact; suggestedTitle?: string }
+  | { kind: 'mixed'; messages: NormalizedMessage[]; compact: NormalizedCompact; suggestedTitle?: string }
   | { kind: 'error'; reason: string };
 
 const ROLE_LINE = /^\s*(user|assistant|system|tool|human|ai|bot|function|correction)\s*:\s*/i;
@@ -152,10 +152,24 @@ function coerceCompact(value: unknown): NormalizedCompact | null {
  * as a compaction only when there are no messages (so a plain `{ messages }`
  * with a stray `summary` is not misread as mixed).
  */
+/**
+ * Pull an agent-suggested session title from a JSON payload. Accepts the
+ * canonical `suggested_session_title` and the shorter `session_title` alias.
+ * Ignores the schema placeholder ("optional title" / "ses_...").
+ */
+function pickSuggestedTitle(record: Record<string, unknown>): string | undefined {
+  const raw = record.suggested_session_title ?? record.session_title;
+  if (typeof raw !== 'string') return undefined;
+  const title = raw.trim();
+  if (!title || /^optional\b/i.test(title)) return undefined;
+  return title;
+}
+
 function coerceCombined(value: unknown, limit: number): IngestResult | null {
   if (value === undefined || value === null) return null;
   const messages = coerceMessages(value);
   const record = value && typeof value === 'object' ? (value as Record<string, unknown>) : {};
+  const suggestedTitle = pickSuggestedTitle(record);
 
   let compact: NormalizedCompact | null = null;
   if (record.compaction !== undefined && record.compaction !== null) {
@@ -165,9 +179,9 @@ function coerceCombined(value: unknown, limit: number): IngestResult | null {
   }
 
   const sliced = messages ? messages.slice(0, limit) : null;
-  if (sliced && compact && compact.summary) return { kind: 'mixed', messages: sliced, compact };
-  if (sliced) return { kind: 'messages', messages: sliced };
-  if (compact && compact.summary) return { kind: 'compact', compact };
+  if (sliced && compact && compact.summary) return { kind: 'mixed', messages: sliced, compact, suggestedTitle };
+  if (sliced) return { kind: 'messages', messages: sliced, suggestedTitle };
+  if (compact && compact.summary) return { kind: 'compact', compact, suggestedTitle };
   return null;
 }
 
@@ -248,6 +262,16 @@ function extractTag(text: string, tag: string): string | null {
   return text.slice(start, end).trim();
 }
 
+/** Read a `title="..."` (or `title='...'`) attribute from a tag's open form. */
+function extractTagTitle(text: string, tag: string): string | undefined {
+  const open = text.match(new RegExp(`<${tag}(\\s[^>]*)?>`));
+  if (!open) return undefined;
+  const attrs = open[1] || '';
+  const attr = attrs.match(/\btitle\s*=\s*("([^"]*)"|'([^']*)')/);
+  const title = (attr?.[2] ?? attr?.[3] ?? '').trim();
+  return title || undefined;
+}
+
 function tryJson(text: string): unknown | undefined {
   try {
     return JSON.parse(text);
@@ -322,12 +346,14 @@ export function parseIngestPayload(
     return { kind: 'error', reason: 'empty request body' };
   }
 
-  // 0. Canonical markdown transcript block (raw, human-readable format).
+  // 0. Canonical markdown transcript block (raw, human-readable format). An
+  // optional `title="..."` attribute on the open tag becomes the suggested
+  // session title.
   const transcriptTag = extractTag(text, 'PCP_TRANSCRIPT');
   if (transcriptTag !== null) {
     const transcriptMessages = parseTranscript(transcriptTag);
     if (transcriptMessages.length) {
-      return { kind: 'messages', messages: transcriptMessages.slice(0, limit) };
+      return { kind: 'messages', messages: transcriptMessages.slice(0, limit), suggestedTitle: extractTagTitle(text, 'PCP_TRANSCRIPT') };
     }
     return { kind: 'error', reason: 'PCP_TRANSCRIPT block contained no messages' };
   }
@@ -338,7 +364,7 @@ export function parseIngestPayload(
     const rest = text.slice(partialTranscript.index + partialTranscript[0].length).trim();
     const transcriptMessages = parseTranscript(rest);
     if (transcriptMessages.length) {
-      return { kind: 'messages', messages: transcriptMessages.slice(0, limit) };
+      return { kind: 'messages', messages: transcriptMessages.slice(0, limit), suggestedTitle: extractTagTitle(text, 'PCP_TRANSCRIPT') };
     }
   }
 

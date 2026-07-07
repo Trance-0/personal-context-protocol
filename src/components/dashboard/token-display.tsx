@@ -1,6 +1,7 @@
 'use client';
 
-import { Clipboard, X } from 'lucide-react';
+import { useState } from 'react';
+import { Check, Clipboard, X } from 'lucide-react';
 
 interface TokenDisplayProps {
   content: string;
@@ -9,6 +10,20 @@ interface TokenDisplayProps {
 
 /** Modal overlay showing the generated token + instruction block for copying. */
 export function TokenDisplay({ content, onClose }: TokenDisplayProps) {
+  const [copied, setCopied] = useState(false);
+
+  async function copy() {
+    try {
+      await navigator.clipboard.writeText(content);
+      setCopied(true);
+      window.setTimeout(() => setCopied(false), 1500);
+    } catch {
+      // Clipboard access can be denied (insecure context / permissions); leave
+      // the button in its default state so the user knows to copy manually.
+      setCopied(false);
+    }
+  }
+
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/40 p-4" onClick={onClose}>
       <div
@@ -19,11 +34,15 @@ export function TokenDisplay({ content, onClose }: TokenDisplayProps) {
           <p className="text-sm font-medium text-amber-900 dark:text-amber-200">Copy this token block now. It will not be shown again.</p>
           <div className="flex items-center gap-2">
             <button
-              className="inline-flex items-center gap-2 rounded-md border border-amber-200 bg-white px-3 py-1.5 text-sm text-amber-900 hover:bg-amber-100 dark:border-amber-900/60 dark:bg-slate-950 dark:text-amber-200"
-              onClick={() => navigator.clipboard.writeText(content)}
+              className={`inline-flex items-center gap-2 rounded-md border px-3 py-1.5 text-sm transition-colors ${
+                copied
+                  ? 'border-emerald-300 bg-emerald-50 text-emerald-700 dark:border-emerald-800 dark:bg-emerald-950/50 dark:text-emerald-300'
+                  : 'border-amber-200 bg-white text-amber-900 hover:bg-amber-100 dark:border-amber-900/60 dark:bg-slate-950 dark:text-amber-200'
+              }`}
+              onClick={copy}
               type="button"
             >
-              <Clipboard size={15} /> Copy
+              {copied ? <><Check size={15} /> Copied</> : <><Clipboard size={15} /> Copy</>}
             </button>
             <button className="rounded-md p-1 text-amber-700 hover:bg-amber-100 dark:text-amber-300 dark:hover:bg-amber-950/60" onClick={onClose} type="button" aria-label="Close">
               <X size={18} />

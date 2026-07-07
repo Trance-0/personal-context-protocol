@@ -86,9 +86,11 @@ export const manageTokenSchema = z.object({
 
 // Token schemas. `name` is optional (server defaults it) and `expires_in`
 // chooses the lifetime; default is 7 days, "never" stores a NULL expiry.
+// `can_rename_session` defaults to true so a recording agent can title the
+// session to fit the conversation; the human can always rename afterwards.
 export const createTokenSchema = z.object({
   name: z.string().min(1).max(100).optional(),
-  can_rename_session: z.boolean().optional().default(false),
+  can_rename_session: z.boolean().optional().default(true),
   expires_in: z.enum(EXPIRATION_CHOICES).optional(),
 });
 

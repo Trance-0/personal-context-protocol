@@ -34,7 +34,7 @@ The preferred wire format — for direct upload, for read-back, and for the
 offline paste-back block — is a plain markdown transcript:
 
 ```text
-<PCP_TRANSCRIPT v=1 mode=wild>
+<PCP_TRANSCRIPT v=1 mode=wild title="Short specific title of this conversation">
 ### @user
 
 first user message
@@ -48,9 +48,13 @@ first assistant reply
 - Roles: `@user`, `@assistant`, `@system`, `@tool` (also accepted: `correction`).
 - One `### @role` heading per message; the message text goes verbatim below it.
   Markdown inside messages is fine.
+- **Always set `title="…"`**: a concise, specific description of what the
+  conversation is about (3–8 words, not "Chat" or "Conversation"). It becomes
+  the session title — the session is otherwise stuck named "New Session". JSON
+  uploads use `suggested_session_title` for the same purpose.
 - Escape a content line that itself starts with `### @` as `\### @`.
 - The `<PCP_TRANSCRIPT>` wrapper is required for paste-back blocks and optional
-  for direct HTTP upload.
+  for direct HTTP upload (but recommended, since it carries the title).
 
 No JSON escaping, human-reviewable end to end, and identical in both directions
 (what you record is what a future agent reads back).

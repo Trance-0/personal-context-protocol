@@ -11,14 +11,14 @@ COPY package.json package-lock.json ./
 RUN npm ci --omit=dev
 
 FROM base AS builder
-ARG APP_VERSION=0.1.22
+ARG APP_VERSION=0.1.23
 ENV PCP_VERSION=$APP_VERSION
 COPY --from=deps /app/node_modules ./node_modules
 COPY . .
 RUN npm run build
 
 FROM base AS runner
-ARG APP_VERSION=0.1.22
+ARG APP_VERSION=0.1.23
 ENV NODE_ENV=production \
     NEXT_TELEMETRY_DISABLED=1 \
     PORT=3000 \

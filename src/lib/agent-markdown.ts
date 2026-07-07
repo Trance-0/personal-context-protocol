@@ -81,7 +81,7 @@ export function buildTranscriptDocument(options: {
 /** Small transcript example embedded in instructions and fallback prompts. */
 export function transcriptExampleText(mode: RecordingMode = 'wild'): string {
   return [
-    `<PCP_TRANSCRIPT v=${TRANSCRIPT_VERSION} mode=${displayMode(mode)}>`,
+    `<PCP_TRANSCRIPT v=${TRANSCRIPT_VERSION} mode=${displayMode(mode)} title="Rotating the deploy SSH key">`,
     '### @user',
     '',
     'How do I rotate the deploy key?',
@@ -156,13 +156,16 @@ context — read it and continue the work; recording new messages is then option
 ## 2. Record this conversation (primary method: plain markdown)
 
 POST the conversation as a raw markdown transcript — one \`### @role\` heading
-per message, message text below it, in order. No JSON required.
+per message, message text below it, in order. Wrap it in a \`<PCP_TRANSCRIPT>\`
+tag and **always set a \`title\`** that captures what this conversation is
+about. No JSON required.
 
 \`\`\`bash
 curl -X POST "${ingestUrl}" \\
   -H "Authorization: Bearer <access-token>" \\
   -H "Content-Type: text/markdown" \\
   --data-binary @- <<'EOF'
+<PCP_TRANSCRIPT v=1 title="Short specific title of this conversation">
 ### @user
 
 first user message
@@ -170,9 +173,15 @@ first user message
 ### @assistant
 
 first assistant reply
+</PCP_TRANSCRIPT>
 EOF
 \`\`\`
 
+- **Title (do this):** the session starts named "New Session". Replace it via
+  the \`title="…"\` attribute with a concise, specific description of the actual
+  topic (e.g. "Debugging Postgres connection pool exhaustion"), not a generic
+  label like "Chat" or "Conversation". A good title is 3–8 words and lets the
+  user find this session later at a glance.
 - Roles: \`@user\`, \`@assistant\`, \`@system\`, \`@tool\`.
 - Include **every message of this conversation**, including the message that
   asked you to record and your own replies.
@@ -188,8 +197,9 @@ conversation was recorded unless you received that success response.
 ## 3. Alternatives
 
 - **Structured JSON** (optional): \`POST ${messagesUrl}\`
-  with \`{ "messages": [ { "role": "user", "content": "..." } ] }\` — same
-  auth header. Schema: \`${schemaUrl}\`.
+  with \`{ "messages": [ { "role": "user", "content": "..." } ],
+  "suggested_session_title": "Short specific title" }\` — same auth header.
+  Schema: \`${schemaUrl}\`.
 - **Compact summary** (only when messages cannot be reconstructed):
   \`POST ${compactUrl}\` with
   \`{ "summary": "...", "decisions": [], "open_questions": [] }\`.
@@ -202,9 +212,9 @@ ${transcriptExampleText(mode)}
 
 ## Boundaries
 
-- Append messages and compactions to this session only; suggest a session
-  title if asked. Do not manage topics, do not rewrite or delete existing
-  messages, do not access other sessions.
+- Append messages and compactions to this session only, and set a descriptive
+  session title (above). Do not manage topics, do not rewrite or delete
+  existing messages, do not access other sessions.
 - On error the server returns \`{ ok: false, code, retryable, message,
   next_steps }\` — follow \`next_steps\`; stop and tell your user on
   \`TOKEN_EXPIRED\`, \`TOKEN_REVOKED\`, \`SESSION_MISMATCH\`, or \`NOT_FOUND\`.

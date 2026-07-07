@@ -345,6 +345,13 @@ message text below each, optionally wrapped in
 end to end. A content line that itself starts with `### @` is escaped as
 `\### @`.
 
+A `title="…"` attribute on the `<PCP_TRANSCRIPT>` tag (or a top-level
+`suggested_session_title` / `session_title` field in JSON payloads) suggests
+the session title; it is normalized, de-duplicated within the topic, and
+applied when the token has `can_rename_session` (the default for new tokens).
+A restricted token's suggestion is dropped silently rather than failing the
+ingest.
+
 Also accepted (backward compatible): raw JSON with top-level `messages` or
 `summary`, `{ messages, compaction }` (mixed), `<PCP_INGEST>...</PCP_INGEST>`,
 `<PCP_APPEND>...</PCP_APPEND>`, `<PCP_COMPACT>...</PCP_COMPACT>`, ChatML-like

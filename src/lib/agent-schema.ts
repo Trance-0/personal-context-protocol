@@ -150,6 +150,7 @@ export function buildFallbackInstruction(mode: DisplayMode, appUrl: string): str
     `Mode: ${mode}.`,
     '',
     'Rules:',
+    '- Set the `title="…"` attribute on the <PCP_TRANSCRIPT> tag to a concise, specific description of what this conversation is about (3–8 words; not a generic label like "Chat"). This becomes the session title.',
     '- Start each message with a `### @role` line (roles: @user, @assistant, @system, @tool); put the message text verbatim below it. Markdown inside messages is fine.',
     '- Include every visible message of this conversation, in order, including this exchange.',
     '- If a message line itself starts with `### @`, escape it as `\\### @`.',

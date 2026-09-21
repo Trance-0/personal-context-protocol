@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation';
 import { FormEvent, useEffect, useState } from 'react';
 import { ArrowLeft, Check, KeyRound } from 'lucide-react';
 import { SiteNav } from '@/components/site-nav';
+import { DiagnosticsPanel } from '@/components/diagnostics-panel';
 import { readJsonResponse } from '@/lib/http';
 import { diagnosticMessage, errorCause } from '@/lib/logging';
 
@@ -25,21 +26,27 @@ export default function SettingsPage() {
   const [status, setStatus] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
+  // Held in state rather than read per render: localStorage is unavailable
+  // during the server pass, and the panel needs a stable value to fetch with.
+  const [token, setToken] = useState('');
 
   useEffect(() => {
-    if (!getUiToken()) {
+    const current = getUiToken();
+    if (!current) {
       router.replace('/login?next=/settings');
+      return;
     }
+    setToken(current);
   }, [router]);
 
   async function updateToken(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    const token = newToken.trim();
-    if (token.length < 32) {
+    const candidate = newToken.trim();
+    if (candidate.length < 32) {
       setError('Unable to update admin token: admin settings / custom token validation - token must be at least 32 characters');
       return;
     }
-    if (token !== confirmToken.trim()) {
+    if (candidate !== confirmToken.trim()) {
       setError('Unable to update admin token: admin settings / custom token confirmation - token fields do not match');
       return;
     }
@@ -54,7 +61,7 @@ export default function SettingsPage() {
           'Content-Type': 'application/json',
           Authorization: `Bearer ${getUiToken()}`,
         },
-        body: JSON.stringify({ new_token: token }),
+        body: JSON.stringify({ new_token: candidate }),
       });
       const data = await readJsonResponse(response, {
         consequence: 'Unable to update admin token',
@@ -67,7 +74,8 @@ export default function SettingsPage() {
         return;
       }
 
-      localStorage.setItem('ui_token', token);
+      localStorage.setItem('ui_token', candidate);
+      setToken(candidate);
       setNewToken('');
       setConfirmToken('');
       setStatus('Admin token updated. This browser now uses the new token.');
@@ -85,7 +93,7 @@ export default function SettingsPage() {
   return (
     <main className="min-h-screen bg-slate-50 text-slate-950 dark:bg-slate-950 dark:text-slate-50">
       <SiteNav />
-      <section className="mx-auto max-w-xl px-4 py-12 sm:px-6">
+      <section className="mx-auto max-w-3xl space-y-6 px-4 py-12 sm:px-6">
         <form className="rounded-md border border-slate-200 bg-white p-5 shadow-soft dark:border-slate-800 dark:bg-slate-900" onSubmit={updateToken}>
           <div className="mb-5 flex items-center gap-3">
             <div className="rounded-md bg-slate-950 p-3 text-white dark:bg-sky-400 dark:text-slate-950">
@@ -147,6 +155,10 @@ export default function SettingsPage() {
             </Link>
           </div>
         </form>
+
+        {/* What this deployment is and what it has been doing. Answering
+            either question previously meant probing the API by hand. */}
+        <DiagnosticsPanel token={token} />
       </section>
     </main>
   );

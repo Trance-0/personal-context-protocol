@@ -545,3 +545,50 @@ the request origin. `PCP_APP_URL` is about constructing absolute URLs, not CORS.
 Exports app data as JSON for the UI token holder.
 
 The export omits plaintext tokens.
+
+## Diagnostics
+
+### GET `/diagnostics`
+
+What this deployment actually is, for the UI token holder. `/health` reports
+only that the process is up; a deployment can be healthy, authenticate, serve
+its data, and still be missing an entire feature line because it was built from
+a branch that never received it — from outside, that is indistinguishable from
+a bug, because the routes simply `404`.
+
+```json
+{
+  "build": { "version": "0.1.24", "commit": "d351bf85", "branch": "main",
+             "runtime": "node v20.11.0", "environment": "production" },
+  "database": { "ok": true, "latencyMs": 24, "error": null },
+  "counts": { "topics": 6, "sessions": 15, "messages": 258, "events": 312, "active_tokens": 3 },
+  "migrations": [{ "version": "001_initial", "appliedAt": "..." }],
+  "config": [{ "key": "PCP_INSTANCE_SECRET", "severity": "error", "problem": "is not set" }],
+  "features": [{ "id": "scoped-tokens", "label": "Scoped tokens and manager API",
+                 "migration": "008_scoped_tokens", "present": true,
+                 "routes": ["/api/v1/tokens"], "description": "..." }]
+}
+```
+
+Feature presence is decided by the migrations the database reports, not by the
+version number: two branches can share a version and differ completely in
+content, which is precisely what makes a version alone untrustworthy here.
+
+Each probe is isolated, so a database that is down still yields a report saying
+so rather than a `500` that says nothing.
+
+### GET `/events`
+
+The instance-wide activity log for the UI token holder. Every write path
+already records an event — `session.created`, `message.appended`,
+`token.created`, `token.deleted`, `topic.created`, `session.renamed`,
+`compaction.recorded` — but nothing read them back, so the table grew and
+answered no questions.
+
+Query parameters: `limit` (1–200, default 50), `action`, `actor`, `session_id`.
+Session titles are resolved in one extra query, since an id alone does not say
+which conversation a line is about.
+
+This is deliberately not a request log: on serverless each instance would keep
+its own in-memory buffer and show a partial picture, whereas these events are
+in Postgres and every reader sees the same history.

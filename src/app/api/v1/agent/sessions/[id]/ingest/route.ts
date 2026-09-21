@@ -80,6 +80,9 @@ export async function POST(
         const result = await appendMessagesToSession({
           sessionId: params.id,
           messages: validation.data.messages,
+          // A restricted token cannot rename; drop the suggestion rather than
+          // failing the whole ingest.
+          suggestedTitle: authResult.canRenameSession ? parsed.suggestedTitle : undefined,
           canRenameSession: authResult.canRenameSession,
           actor,
         });
@@ -96,7 +99,7 @@ export async function POST(
       ? 'Imported a compact summary. No raw messages were included.'
       : messagesImported === 0 && incoming.length > 0
         ? 'Everything in the payload was already recorded.'
-        : 'Imported message-level fallback JSON.';
+        : 'Imported message-level content.';
 
     return NextResponse.json({
       ok: true,

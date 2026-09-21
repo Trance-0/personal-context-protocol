@@ -11,7 +11,7 @@ import { CreateModal, TopicCreateValues, SessionCreateValues } from '@/component
 import { EventLog, Message, Session, Topic } from '@/components/dashboard/types';
 import { readJsonResponse } from '@/lib/http';
 import { diagnosticMessage, errorCause } from '@/lib/logging';
-import { buildAgentInstruction, buildExportInstruction, buildImportInstruction } from '@/lib/agent-protocol';
+import { buildExportInstruction, buildImportInstruction, buildMinimalInstruction } from '@/lib/agent-protocol';
 import { buildMcpInstruction } from '@/lib/agent-schema';
 import { DEFAULT_SESSION_TITLE, DEFAULT_TOPIC_TITLE, generateUniqueTitle } from '@/lib/naming';
 
@@ -327,9 +327,9 @@ function DashboardContent() {
       const data = await readJsonResponse(res, { consequence: 'Unable to create token', moduleProcess: 'session token administration / create token request', fallbackCause: 'create token endpoint did not return JSON' });
       if (!res.ok || data.error || !data.access_token) { setError(data.error || 'Unable to create token'); return; }
       const url = `${window.location.origin}/r/${session.id}`;
-      const instruction = buildAgentInstruction(url, data.access_token, session.mode || 'wild');
+      const instruction = buildMinimalInstruction(url, data.access_token);
       setGeneratedToken(instruction);
-      setStatus('Recording URL + access token created. Copy now; the token will not be shown again.');
+      setStatus('Recording URL + access token created (minimal prompt — the URL carries the full instructions). Copy now; the token will not be shown again.');
       await navigator.clipboard.writeText(instruction).catch(() => undefined);
     } catch (err) { setError(diagnosticMessage({ consequence: 'Unable to create token', moduleProcess: 'session token administration / create token request', cause: `browser could not reach the token endpoint; ${errorCause(err)}` })); }
   }

@@ -39,14 +39,19 @@ export async function buildDiscovery(
 
   const existingCount = countRow ? countRow.count : 0;
 
+  const recordingUrl = base ? buildRecordingUrl(base, sessionId) : null;
   return {
     status: 200,
     body: {
       ...protocol,
-      recording_url: base ? buildRecordingUrl(base, sessionId) : null,
+      recording_url: recordingUrl,
+      instructions_url: recordingUrl ? `${recordingUrl}?format=md` : null,
+      transcript_url: recordingUrl ? `${recordingUrl}/transcript` : null,
+      preferred_upload_format:
+        'Raw markdown transcript (`### @role` sections) posted to ingest_any with Content-Type: text/markdown. JSON is also accepted.',
       existing_message_count: existingCount,
       hint: existingCount > 0
-        ? `This session has ${existingCount} message(s). Fetch read_messages to review them, then continue recording from ordinal ${existingCount + 1}.`
+        ? `This session has ${existingCount} message(s). Fetch read_transcript to review them, then continue recording from ordinal ${existingCount + 1}.`
         : 'This session has no messages yet. Record the full conversation history.',
     },
   };

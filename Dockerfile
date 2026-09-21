@@ -1,5 +1,4 @@
-ARG NODE_IMAGE=node:20-bookworm-slim
-FROM ${NODE_IMAGE} AS base
+FROM node:20-bookworm-slim AS base
 WORKDIR /app
 ENV NEXT_TELEMETRY_DISABLED=1
 
@@ -12,14 +11,14 @@ COPY package.json package-lock.json ./
 RUN npm ci --omit=dev
 
 FROM base AS builder
-ARG APP_VERSION=0.1.22
+ARG APP_VERSION=0.1.24
 ENV PCP_VERSION=$APP_VERSION
 COPY --from=deps /app/node_modules ./node_modules
 COPY . .
 RUN npm run build
 
 FROM base AS runner
-ARG APP_VERSION=0.1.22
+ARG APP_VERSION=0.1.24
 ENV NODE_ENV=production \
     NEXT_TELEMETRY_DISABLED=1 \
     PORT=3000 \

@@ -82,6 +82,72 @@ Shipped within the v0.1 line (still gated on v0.1 Remaining Hardening before v0.
 - [x] **Message correction** (v0.1.10): human admin edit/delete (append-only still enforced for AI);
   multi-select with select-all + shift-range; long messages fold to 5 lines in select mode
 
+## v0.1.23 Completed — Copy feedback, drag jitter, agent titling
+
+- [x] **Copy shows "Copied"** — the token-block modal's Copy button now flashes
+  a green "Copied" state (with check icon) on a successful clipboard write and
+  stays unchanged when clipboard access is denied, so the user knows to copy
+  manually
+- [x] **Drag-to-recategorize jitter fixed** — `onDragOver` no longer calls
+  `onToggleExpand` on every event (which thrashed the folder open/closed while
+  hovering). Drop targets now show a steady ring highlight, and a collapsed
+  topic auto-expands once after ~550 ms of hovering; the timer is cancelled on
+  drag leave/drop/end
+- [x] **Agents now title sessions to fit the conversation** — three root causes
+  fixed:
+  - `can_rename_session` defaulted to `false`, so agent title suggestions were
+    rejected with FORBIDDEN; new tokens now default to `true`
+  - the primary markdown transcript path had no title channel; the parser now
+    reads `title="…"` from the `<PCP_TRANSCRIPT>` tag (and
+    `suggested_session_title` / `session_title` from JSON payloads, ignoring
+    the schema placeholder), and the agent ingest route applies it — dropped
+    silently for restricted tokens instead of failing the ingest
+  - instructions barely mentioned titling; the recording-URL document, shared
+    recording prompts, minimal prompt, and Wild/Strict fallback prompts now
+    all require a concise 3–8-word title (not "Chat"/"New Session"), and the
+    transcript examples carry a `title` attribute; the export panel emits
+    `title="…"` (quote-escaped) so exports round-trip the title too
+- [x] Tests: copied-state markup compiles; 7 new title-channel tests (tag
+  attribute single/double quotes, unclosed tag, JSON aliases, placeholder
+  ignored, instruction-doc requirement); 149 tests pass
+
+## v0.1.22 Completed — Markdown-first protocol (URL + token is the whole prompt)
+
+Goal: no capable agent refuses the sync request, and the human hands over only
+a URL + token. The refusal driver was JSON-first everything; the raw markdown
+transcript is now the canonical, human-readable wire format in both directions.
+
+- [x] **Self-describing recording URL** — `GET /r/:sessionId` serves a
+  self-contained markdown instruction document by default (consent framing,
+  scoped append-only token semantics, exact curl examples, transcript format,
+  limits, mode guidance, existing message count). JSON descriptor still served
+  via `?format=json` / `Accept: application/json`; `?format=md` forces markdown
+- [x] **Canonical markdown transcript** — `### @role` sections with `\### @`
+  escaping (round-trip safe), optional `<PCP_TRANSCRIPT v=1 mode=…>` wrapper;
+  parser accepts the block (attributes tolerated, unclosed tag recovered,
+  agent preamble prose ignored) ahead of all JSON forms; JSON/ChatML/legacy
+  wrappers remain accepted
+- [x] **Transcript read-back** — `GET /r/:sessionId/transcript` (bearer token)
+  returns the session as a re-importable markdown document; advertised as
+  `read_transcript` + `transcript_url` in the protocol descriptor. This is the
+  cross-device context pull for the "sync Claude across devices" flow
+- [x] **Minimal prompt** — `buildMinimalInstruction` (URL + token + two steps)
+  is now what Generate token copies and is returned as `minimal_instruction`
+  from the token route; full prompts rewritten transcript-first
+- [x] **Fallback prompts** — Wild/Strict copy-paste prompts now request a
+  `<PCP_TRANSCRIPT>` markdown block (no JSON, no escaping pitfalls); strict
+  redaction notes move to `> redacted:` lines; JSON form documented as the
+  structured-output alternative
+- [x] **Export round-trip** — Import/Export panel copies/downloads the session
+  as a canonical `<PCP_TRANSCRIPT>` document (wild redacts via `redactSecrets`);
+  pasting it into another session's Import box reproduces the messages
+- [x] **Schema descriptor** — advertises `text/markdown`, `PCP_TRANSCRIPT`
+  wrapper, `preferred_format`, and a `transcript_example`
+- [x] Tests: transcript render/parse round-trips (incl. heading-like content),
+  wrapper/attribute/unclosed-tag recovery, instruction document invariants
+  (no token, consent framing, offline path), minimal-prompt shape; docs synced
+  (protocol.md, agent-instructions.md, README cross-device recipe)
+
 ## v0.1.21 Completed — Consent-framed token prompts + layout scroll fix
 
 - [x] **Refusal-aware token prompts** — `buildAgentInstruction` /
@@ -173,7 +239,10 @@ Shipped within the v0.1 line (still gated on v0.1 Remaining Hardening before v0.
     * [x] Add an audit event for compact import (compaction.recorded).
     * [x] Add tests for compact-only import and compact-with-messages import.
 
-* [ ] **Canonical agent fallback format**
+* [ ] **Canonical agent fallback format** — *superseded in v0.1.22: the
+  canonical fallback is now the `<PCP_TRANSCRIPT>` markdown block (JSON forms
+  remain accepted for backward compatibility); the JSON-canonical plan below is
+  kept for reference only.*
 
   * Context: Different agents are returning incompatible fallback formats. Some return generic JSON, some return `PCP_COMPACT`, and some omit fields required for message recording.
   * Trigger: Give an agent a Recording URL and Access Token, then ask it to record a session when direct upload is unavailable.

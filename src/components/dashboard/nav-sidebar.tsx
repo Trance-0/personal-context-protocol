@@ -1,6 +1,6 @@
 'use client';
 
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { ChevronRight, Folder, FolderPlus, Inbox, MessageSquare, Plus, RefreshCw, RotateCcw, Search, Trash2 } from 'lucide-react';
 import { Session, Topic } from './types';
 import { ContextMenu, ContextMenuItem } from './context-menu';
@@ -45,6 +45,33 @@ export function NavSidebar({
 }: NavSidebarProps) {
   const [menu, setMenu] = useState<MenuState | null>(null);
   const [dragId, setDragId] = useState<string | null>(null);
+  // Key of the group currently under the drag cursor (for the drop highlight).
+  const [dropKey, setDropKey] = useState<string | null>(null);
+  // One-shot "expand on hover" timer, plus a live mirror of `expanded` so the
+  // deferred callback never toggles a group that opened in the meantime.
+  const expandTimer = useRef<{ key: string; handle: ReturnType<typeof setTimeout> } | null>(null);
+  const expandedRef = useRef(expanded);
+  expandedRef.current = expanded;
+
+  function cancelExpand() {
+    if (expandTimer.current) { clearTimeout(expandTimer.current.handle); expandTimer.current = null; }
+  }
+
+  // Auto-expand a collapsed group after a short hover, exactly once — never on
+  // every dragover event (that was the source of the open/close jitter).
+  function scheduleExpand(key: string) {
+    if (expandedRef.current.has(key)) return;
+    if (expandTimer.current?.key === key) return;
+    cancelExpand();
+    const handle = setTimeout(() => {
+      expandTimer.current = null;
+      if (!expandedRef.current.has(key)) onToggleExpand(key);
+    }, 550);
+    expandTimer.current = { key, handle };
+  }
+
+  // Cancel any pending expand when the drag session ends anywhere.
+  useEffect(() => cancelExpand, []);
 
   const visibleSessions = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -112,11 +139,34 @@ export function NavSidebar({
 
   // Drag-and-drop: session → topic.
   function dragStart(sessionId: string) { setDragId(sessionId); }
-  function dragEnd() { setDragId(null); }
-  function dropTarget(topicId: string | null) {
+  function dragEnd() { setDragId(null); setDropKey(null); cancelExpand(); }
+
+  /**
+   * Drop-target handlers for a group. `key` identifies the group (for the
+   * highlight + hover-expand); `topicId` is where a dropped session lands
+   * (null = uncategorized). onDragOver only sets state when it actually
+   * changes, so hovering no longer thrashes the folder open/closed.
+   */
+  function dropTarget(key: string, topicId: string | null) {
     return {
-      onDragOver: (e: React.DragEvent) => { e.preventDefault(); if (topicId !== null) onToggleExpand(topicId); },
-      onDrop: (e: React.DragEvent) => { e.preventDefault(); if (dragId) onMoveSession(dragId, topicId); setDragId(null); },
+      onDragOver: (e: React.DragEvent) => {
+        e.preventDefault();
+        setDropKey((prev) => (prev === key ? prev : key));
+        scheduleExpand(key);
+      },
+      onDragLeave: (e: React.DragEvent) => {
+        // Ignore leaves into descendant elements; only react to leaving the group.
+        if (e.currentTarget.contains(e.relatedTarget as Node | null)) return;
+        setDropKey((prev) => (prev === key ? null : prev));
+        cancelExpand();
+      },
+      onDrop: (e: React.DragEvent) => {
+        e.preventDefault();
+        cancelExpand();
+        if (dragId) onMoveSession(dragId, topicId);
+        setDragId(null);
+        setDropKey(null);
+      },
     };
   }
 
@@ -142,9 +192,15 @@ export function NavSidebar({
 
   function renderGroup(key: string, label: string, icon: React.ReactNode, groupSessions: Session[], menuItems?: ContextMenuItem[], isDropTarget = true) {
     const isOpen = expanded.has(key);
-    const dropProps = isDropTarget ? dropTarget(key === UNCATEGORIZED ? null : (key === TRASH_GROUP ? null : key)) : {};
+    const targetTopicId = key === UNCATEGORIZED || key === TRASH_GROUP ? null : key;
+    const dropProps = isDropTarget ? dropTarget(key, targetTopicId) : {};
+    const isDropActive = isDropTarget && dragId !== null && dropKey === key;
     return (
-      <div key={key} className="mb-1" {...dropProps}>
+      <div
+        key={key}
+        className={`mb-1 rounded-md ${isDropActive ? 'ring-2 ring-inset ring-sky-400 bg-sky-50 dark:bg-sky-950/40' : ''}`}
+        {...dropProps}
+      >
         <button
           className="group flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm font-medium text-slate-700 hover:bg-slate-100 dark:text-slate-200 dark:hover:bg-slate-800"
           onClick={() => onToggleExpand(key)}

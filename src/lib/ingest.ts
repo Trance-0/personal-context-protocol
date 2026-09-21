@@ -4,11 +4,13 @@
  * Accepts whatever an AI agent can most easily produce and normalizes it into
  * either append-able messages or a compaction record:
  *
+ *   - raw markdown transcript with `### @role` section headings (canonical)
+ *   - <PCP_TRANSCRIPT> ... </PCP_TRANSCRIPT>  (markdown transcript block)
  *   - { "messages": [ ... ] }
  *   - <PCP_APPEND> ... </PCP_APPEND>     (JSON: array or { messages })
  *   - <PCP_COMPACT> ... </PCP_COMPACT>   (JSON object, or plain summary text)
  *   - simple ChatML-like arrays:  [ { role, content }, ... ]
- *   - raw markdown / text transcript ("User: ...\nAssistant: ...")
+ *   - loose "User: ...\nAssistant: ..." transcript lines
  *
  * Pure and self-contained so it can be unit-tested. Returns a discriminated
  * result; the route turns `{ kind: 'error' }` into structured retry guidance.
@@ -39,9 +41,9 @@ export interface NormalizedCompact {
 }
 
 export type IngestResult =
-  | { kind: 'messages'; messages: NormalizedMessage[] }
-  | { kind: 'compact'; compact: NormalizedCompact }
-  | { kind: 'mixed'; messages: NormalizedMessage[]; compact: NormalizedCompact }
+  | { kind: 'messages'; messages: NormalizedMessage[]; suggestedTitle?: string }
+  | { kind: 'compact'; compact: NormalizedCompact; suggestedTitle?: string }
+  | { kind: 'mixed'; messages: NormalizedMessage[]; compact: NormalizedCompact; suggestedTitle?: string }
   | { kind: 'error'; reason: string };
 
 const ROLE_LINE = /^\s*(user|assistant|system|tool|human|ai|bot|function|correction)\s*:\s*/i;
@@ -150,10 +152,24 @@ function coerceCompact(value: unknown): NormalizedCompact | null {
  * as a compaction only when there are no messages (so a plain `{ messages }`
  * with a stray `summary` is not misread as mixed).
  */
+/**
+ * Pull an agent-suggested session title from a JSON payload. Accepts the
+ * canonical `suggested_session_title` and the shorter `session_title` alias.
+ * Ignores the schema placeholder ("optional title" / "ses_...").
+ */
+function pickSuggestedTitle(record: Record<string, unknown>): string | undefined {
+  const raw = record.suggested_session_title ?? record.session_title;
+  if (typeof raw !== 'string') return undefined;
+  const title = raw.trim();
+  if (!title || /^optional\b/i.test(title)) return undefined;
+  return title;
+}
+
 function coerceCombined(value: unknown, limit: number): IngestResult | null {
   if (value === undefined || value === null) return null;
   const messages = coerceMessages(value);
   const record = value && typeof value === 'object' ? (value as Record<string, unknown>) : {};
+  const suggestedTitle = pickSuggestedTitle(record);
 
   let compact: NormalizedCompact | null = null;
   if (record.compaction !== undefined && record.compaction !== null) {
@@ -163,14 +179,58 @@ function coerceCombined(value: unknown, limit: number): IngestResult | null {
   }
 
   const sliced = messages ? messages.slice(0, limit) : null;
-  if (sliced && compact && compact.summary) return { kind: 'mixed', messages: sliced, compact };
-  if (sliced) return { kind: 'messages', messages: sliced };
-  if (compact && compact.summary) return { kind: 'compact', compact };
+  if (sliced && compact && compact.summary) return { kind: 'mixed', messages: sliced, compact, suggestedTitle };
+  if (sliced) return { kind: 'messages', messages: sliced, suggestedTitle };
+  if (compact && compact.summary) return { kind: 'compact', compact, suggestedTitle };
   return null;
 }
 
-/** Best-effort transcript parse: split on `Role:` line markers. */
+/** Canonical transcript heading: `### @role` alone on its line. */
+const TRANSCRIPT_HEADING = /^###\s*@([A-Za-z_]+)\s*$/;
+
+/** Strip the heading escape produced by the transcript renderer (`\### @` -> `### @`). */
+function unescapeTranscriptLine(line: string): string {
+  return /^\\+###\s*@/.test(line) ? line.slice(1) : line;
+}
+
+/**
+ * Parse the canonical markdown transcript: `### @role` section headings with
+ * the message text below each. Prose before the first heading (e.g. "Here is
+ * the transcript:") is ignored. Returns null when no heading is present.
+ */
+function parseHeadingTranscript(text: string): NormalizedMessage[] | null {
+  const lines = text.split(/\r?\n/);
+  if (!lines.some((line) => TRANSCRIPT_HEADING.test(line))) return null;
+
+  const messages: NormalizedMessage[] = [];
+  let current: { role: MessageRole; lines: string[] } | null = null;
+  for (const line of lines) {
+    const match = line.match(TRANSCRIPT_HEADING);
+    if (match) {
+      if (current) {
+        const content = current.lines.join('\n').trim();
+        if (content) messages.push({ role: current.role, content });
+      }
+      current = { role: normalizeRole(match[1]), lines: [] };
+    } else if (current) {
+      current.lines.push(unescapeTranscriptLine(line));
+    }
+  }
+  if (current) {
+    const content = current.lines.join('\n').trim();
+    if (content) messages.push({ role: current.role, content });
+  }
+  return messages.length ? messages : null;
+}
+
+/**
+ * Best-effort transcript parse. Canonical `### @role` headings win when
+ * present; otherwise split on loose `Role:` line markers.
+ */
 export function parseTranscript(text: string): NormalizedMessage[] {
+  const headingMessages = parseHeadingTranscript(text);
+  if (headingMessages) return headingMessages;
+
   const lines = text.split(/\r?\n/);
   const messages: NormalizedMessage[] = [];
   let current: NormalizedMessage | null = null;
@@ -191,13 +251,25 @@ export function parseTranscript(text: string): NormalizedMessage[] {
   return messages.map((message) => ({ ...message, content: message.content.trim() }));
 }
 
+/** Extract a `<TAG>`/`<TAG attr…>` block body; tolerates attributes in the open tag. */
 function extractTag(text: string, tag: string): string | null {
-  const open = `<${tag}>`;
+  const open = text.match(new RegExp(`<${tag}(?:\\s[^>]*)?>`));
+  if (!open || open.index === undefined) return null;
   const close = `</${tag}>`;
-  const start = text.indexOf(open);
-  const end = text.indexOf(close);
-  if (start === -1 || end === -1 || end < start) return null;
-  return text.slice(start + open.length, end).trim();
+  const start = open.index + open[0].length;
+  const end = text.indexOf(close, start);
+  if (end === -1) return null;
+  return text.slice(start, end).trim();
+}
+
+/** Read a `title="..."` (or `title='...'`) attribute from a tag's open form. */
+function extractTagTitle(text: string, tag: string): string | undefined {
+  const open = text.match(new RegExp(`<${tag}(\\s[^>]*)?>`));
+  if (!open) return undefined;
+  const attrs = open[1] || '';
+  const attr = attrs.match(/\btitle\s*=\s*("([^"]*)"|'([^']*)')/);
+  const title = (attr?.[2] ?? attr?.[3] ?? '').trim();
+  return title || undefined;
 }
 
 function tryJson(text: string): unknown | undefined {
@@ -272,6 +344,28 @@ export function parseIngestPayload(
   const text = (rawBody || '').trim();
   if (!text) {
     return { kind: 'error', reason: 'empty request body' };
+  }
+
+  // 0. Canonical markdown transcript block (raw, human-readable format). An
+  // optional `title="..."` attribute on the open tag becomes the suggested
+  // session title.
+  const transcriptTag = extractTag(text, 'PCP_TRANSCRIPT');
+  if (transcriptTag !== null) {
+    const transcriptMessages = parseTranscript(transcriptTag);
+    if (transcriptMessages.length) {
+      return { kind: 'messages', messages: transcriptMessages.slice(0, limit), suggestedTitle: extractTagTitle(text, 'PCP_TRANSCRIPT') };
+    }
+    return { kind: 'error', reason: 'PCP_TRANSCRIPT block contained no messages' };
+  }
+
+  // 0b. Unclosed PCP_TRANSCRIPT tag (agent forgot </PCP_TRANSCRIPT>).
+  const partialTranscript = text.match(/<PCP_TRANSCRIPT(?:\s[^>]*)?>/);
+  if (partialTranscript && partialTranscript.index !== undefined) {
+    const rest = text.slice(partialTranscript.index + partialTranscript[0].length).trim();
+    const transcriptMessages = parseTranscript(rest);
+    if (transcriptMessages.length) {
+      return { kind: 'messages', messages: transcriptMessages.slice(0, limit), suggestedTitle: extractTagTitle(text, 'PCP_TRANSCRIPT') };
+    }
   }
 
   // 1. Canonical combined block: messages and/or a nested compaction.

@@ -22,6 +22,13 @@ describe('ingest schema endpoint descriptor', () => {
     expect(d.accepted_wrappers).toContain('PCP_INGEST');
     expect(d.accepted_wrappers).toContain('PCP_COMPACT');
   });
+  it('prefers the raw markdown transcript format', () => {
+    expect(d.accepted_wrappers).toContain('PCP_TRANSCRIPT');
+    expect(d.accepted_content_types).toContain('text/markdown');
+    expect(d.preferred_format).toMatch(/markdown transcript/i);
+    expect(d.transcript_example).toContain('<PCP_TRANSCRIPT');
+    expect(d.transcript_example).toContain('### @user');
+  });
 });
 
 describe('mode display', () => {
@@ -37,9 +44,10 @@ describe('mode display', () => {
 describe('generated prompts', () => {
   const appUrl = 'https://pcp.example.com';
 
-  it('wild fallback prompt has no direct-upload language and no token/URL', () => {
+  it('wild fallback prompt asks for a markdown transcript block, no token/URL, no upload', () => {
     const p = buildFallbackInstruction('wild', appUrl);
-    expect(p).toMatch(/import JSON object that I can review and import myself/i);
+    expect(p).toMatch(/<PCP_TRANSCRIPT> markdown block that I can review and import myself/i);
+    expect(p).toContain('### @user');
     expect(p).toMatch(/Do not upload anything directly/i);
     expect(p).toMatch(/Do not keep recording future messages/i);
     expect(p).not.toMatch(/Recording URL:/);
@@ -84,7 +92,7 @@ describe('generated prompts', () => {
     for (const p of prompts) {
       // Consent + capability gate present.
       expect(p).toMatch(/first-party request from your own user/i);
-      expect(p).toMatch(/produce a PCP import JSON object/i);
+      expect(p).toMatch(/produce a <PCP_TRANSCRIPT> markdown block/i);
       expect(p).toMatch(/do not refuse/i);
       // Injection-prone phrasing removed.
       expect(p).not.toMatch(/discover (the |arbitrary )?upload routes/i);
